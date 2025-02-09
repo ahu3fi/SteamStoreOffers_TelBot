@@ -1,11 +1,15 @@
+# Import Modules
+import os
+import json
 import asyncio
 import requests
-import json
+import datetime
 from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
-import os
 
+# Configuration
 TOKEN = "7275053664:AAFqQljTHEcIfwOUWjv0C4W_c3v4qpvy6-Y"
 CHAT_ID = "@SteamStoreOffers"
+# CHAT_ID = "-1002428099433" #For Test Channel
 DATA_FILE = "sent_games.json"
 
 # Fetch Steam discounts
@@ -21,7 +25,6 @@ def get_steam_discounts():
         for category in data.get("specials", {}).get("items", []):
             game_id = str(category.get("id"))
             if game_id in seen_ids:
-                print("Checked")
                 continue
 
             seen_ids.add(game_id)
@@ -49,8 +52,11 @@ def get_steam_discounts():
 def load_sent_games():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+            data = json.load(f)
+            if isinstance(data, dict) and all(isinstance(v, (int, float)) for v in data.values()):
+                return {game_id: {"name": "Unknown", "final_price": price} for game_id, price in data.items()}
+            return data
+    return {}
 
 # Save sent games
 def save_sent_games(sent_games):
@@ -66,14 +72,13 @@ async def send_telegram_message(text, url):
 # Main function
 async def main():
     sent_games = load_sent_games()
-    sent_game_ids = {game["id"] for game in sent_games}
-
     while True:
         games = get_steam_discounts()
-        new_games = [game for game in games if game["id"] not in sent_game_ids]
+        for game in games:
+            game_id = game["id"]
+            final_price = game["final_price"]
 
-        if new_games:
-            for game in new_games:
+            if game_id not in sent_games or sent_games[game_id]["final_price"] != final_price:
                 message = f"""
 🎮 <b>{game['name']}</b>
 
@@ -83,11 +88,17 @@ async def main():
 🔗 <a href="{game['steam_url']}">Steam Link</a>
 """
                 await send_telegram_message(message, game["steam_url"])
-                sent_games.append(game)
-                sent_game_ids.add(game["id"])
 
-            save_sent_games(sent_games)
+                sent_games[game_id] = {
+                    "name": game["name"],
+                    "original_price": game["original_price"],
+                    "final_price": game["final_price"],
+                    "discount_percent": game["discount_percent"],
+                    "steam_url": game["steam_url"],
+                    "date": datetime.datetime.now().strftime("%Y-%m-%d")
+                }
 
+        save_sent_games(sent_games)
         await asyncio.sleep(3600)
 
 if __name__ == "__main__":
